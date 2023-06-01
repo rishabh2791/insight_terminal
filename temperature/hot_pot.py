@@ -1,4 +1,4 @@
 from temperature.temperature import Temperature
 
-class HotPot(Temperature):
+class HotPotTemperature(Temperature):
     pass
