@@ -1,11 +1,14 @@
 import requests
 import settings
 import json
+import time
+from datetime import datetime
 from agitator.anchor import Anchor
 from agitator.cowl import Cowl
 from agitator.paddle import Paddle
 from agitator.emulsifier import Emulsifier
 from agitator.inner import InnerAgitator
+from agitator.hot_pot import HotPot
 from temperature.main_vessel import MainVesselTemperature
 from temperature.hot_pot import HotPotTemperature
 from pressure.main_vessel import MainVesselPressure
@@ -17,6 +20,7 @@ deviceTypes = {
     "Anchor" : Anchor,
     "Cowl" : Cowl,
     "Emulsifier" : Emulsifier,
+    "Hot Pot": HotPot,
     "Hot Pot Load Cell" : HotPotWeight,
     "Hot Pot Temperature" : HotPotTemperature,
     "Inner Agitator" : InnerAgitator,
@@ -30,6 +34,8 @@ devices = []
 
 
 def getAllVesselDevices():
+    start = datetime.now()
+    print("Getting Devices List")
     url = settings.BASE_URL + "device/"
     condition = {
         "EQUALS":
@@ -43,15 +49,30 @@ def getAllVesselDevices():
         exit()
     payloads = json.loads(response.content.decode("utf-8"))["payload"]
     for payload in payloads:
-        model = deviceTypes[payload["device_type"]["description"]](payload)
-        devices.append(model)
+        if payload["enabled"]:
+            model = deviceTypes[payload["device_type"]["description"]](payload)
+            devices.append(model)
+    timeTaken = datetime.now() - start
+    print(f"Got Devices List in {timeTaken}s.")
+
+
+def getDeviceData():
+    for device in devices:
+        device.read()
+
+
+def runTimer():
+    while True:
+        time.sleep(1)
+        getDeviceData()
 
 
 def main():
     getAllVesselDevices()
-    print(devices)
-    pass
+    # runTimer()
 
 
 if __name__=="__main__":
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
     main()
