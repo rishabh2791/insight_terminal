@@ -1,3 +1,5 @@
+import requests
+import settings
 import minimalmodbus
 import RPi.GPIO as GPIO
 
@@ -39,7 +41,8 @@ class Device:
         
 
     def initModbus(self):
-        self.instrument = minimalmodbus.Instrument("/dev/ttyAgitators", self.nodeAddress, close_port_after_each_call = self.closePort)
+        self.instrument = minimalmodbus.Instrument("/dev/ttyAgitators", self.nodeAddress)
+        self.instrument.mode = minimalmodbus.MODE_RTU
         self.instrument.serial.parity = minimalmodbus.serial.PARITY_NONE
         self.instrument.serial.baudrate = self.baudrate
         self.instrument.serial.bytesize = self.byteSize
@@ -60,12 +63,20 @@ class Device:
             data = self.readFromGPIO()
         else:
             data = self.readFromModbus() 
+            url = settings.BASE_URL + "devicedata/create/"
+            postData = {
+                "device_id" : self.deviceID,
+                "value" : data[0],
+            }
+            response = requests.post(url, json=postData)
+            print(response)
+            print("{} - {}".format(self.nodeAddress, data))
 
 
     def readFromModbus(self):
         data = self.instrument.read_registers(self.readStart, self.messageLength, 3)
         self.instrument.serial.close() 
-        return data[0]
+        return data
 
 
     def readFromGPIO(self):
