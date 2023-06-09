@@ -1,3 +1,4 @@
+import serial
 import requests
 import settings
 import minimalmodbus
@@ -7,7 +8,9 @@ class Device:
     deviceID = None
     isConstant = False
     constantValue = 0.0
+    factor = 1
     nodeAddress = 1
+    port = "/dev/ttyAgitators"
     additionalNodeAddress = 22
     readStart = 0
     baudrate = 9600
@@ -18,9 +21,12 @@ class Device:
     clearBuffer = True
     closePort = True
     instrument = None
+    communicationMethod = "modbus"
+    previousState = None
     
 
     def __init__(self, map):
+        self.port = map["port"]
         self.deviceID = map["id"]
         self.baudrate = map["baud_rate"]
         self.byteSize = map["byte_size"]
@@ -30,18 +36,22 @@ class Device:
         self.isConstant = map["is_constant"]
         self.messageLength = map["message_length"]
         self.nodeAddress = map["node_address"]
+        self.factor = map["factor"]
         self.additionalNodeAddress = map["additional_node_address"]
         self.readStart = map["read_start"]
         self.stopBits = map["stop_bits"]
         self.timeout = map["time_out"]
-        if (self.isConstant):
+        self.communicationMethod = map["communication_method"]
+        if (self.communicationMethod == "constant"):
             self.initGPIO()
-        else:
+        if (self.communicationMethod == "modbus"):
             self.initModbus()
-        
+        if(self.communicationMethod=="serial"):
+            self.initSerial()
 
+    
     def initModbus(self):
-        self.instrument = minimalmodbus.Instrument("/dev/ttyAgitators", self.nodeAddress)
+        self.instrument = minimalmodbus.Instrument(self.port, self.nodeAddress)
         self.instrument.mode = minimalmodbus.MODE_RTU
         self.instrument.serial.parity = minimalmodbus.serial.PARITY_NONE
         self.instrument.serial.baudrate = self.baudrate
@@ -54,23 +64,40 @@ class Device:
 
     def initGPIO(self):
         GPIO.setup(self.additionalNodeAddress, GPIO.OUT)
-        GPIO.setup(self.nodeAddress, GPIO.IN, GPIO.PUD_UP)
+        GPIO.setup(self.nodeAddress, GPIO.IN, GPIO.PUD_DOWN)
+        GPIO.output(self.additionalNodeAddress, GPIO.LOW)
+        self.previousState = GPIO.input(self.nodeAddress)
+
+
+    def initSerial(self):
+        self.instrument = serial.Serial(self.port)
+        self.instrument.parity = minimalmodbus.serial.PARITY_NONE
+        self.instrument.baudrate = self.baudrate
+        self.instrument.bytesize = self.byteSize
+        self.instrument.stopbits = self.stopBits
+        self.instrument.timeout = self.timeout
+        self.instrument.close()
 
 
     def read(self):
-        data = None
-        if(self.isConstant):
+        url = settings.BASE_URL + "devicedata/create/"
+        postData = {
+            "device_id": self.deviceID,
+            "value": 0
+        }
+        if(self.communicationMethod == "constant"):
             data = self.readFromGPIO()
-        else:
+            postData["value"] = data
+        if (self.communicationMethod == "modbus"):
             data = self.readFromModbus() 
-            url = settings.BASE_URL + "devicedata/create/"
-            postData = {
-                "device_id" : self.deviceID,
-                "value" : data[0],
-            }
-            response = requests.post(url, json=postData)
-            print(response)
-            print("{} - {}".format(self.nodeAddress, data))
+            postData["value"] = round(data[0]/self.factor,2)
+        if (self.communicationMethod == "serial"):
+            data = self.readFromSerial()
+            weight = round(float(self.readFromSerial()[-2]),2)
+            postData["value"] = weight
+        print(postData)
+        response = requests.post(url, json=postData)
+        print(response)
 
 
     def readFromModbus(self):
@@ -80,6 +107,18 @@ class Device:
 
 
     def readFromGPIO(self):
-        status = GPIO.input(self.instrument)
-        if(status == GPIO.HIGH):
+        GPIO.output(self.additionalNodeAddress, GPIO.HIGH)
+        currentState = GPIO.input(self.nodeAddress)
+        GPIO.output(self.additionalNodeAddress, GPIO.LOW)
+        if(currentState == GPIO.HIGH and self.previousState == GPIO.LOW):
             return self.constantValue
+        else:
+            self.previousState = currentState
+            return 0
+        
+        
+    def readFromSerial(self):
+        self.instrument.open()
+        lines = self.instrument.readlines(3)
+        self.instrument.close()
+        return lines[-1].decode("utf-8").split(" ")
